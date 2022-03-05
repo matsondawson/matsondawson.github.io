@@ -262,8 +262,6 @@
 		let player_yv = windowX * cos;
 
 		while (windowX < windowXmax-1) {
-		  let rayStep = 1;
-		  
 		  let ray_x = player_x;
 		  let ray_y = player_y;
 		  let ray_z = player_z;
@@ -305,11 +303,10 @@
 			  ray_z = player_z + ray_zv * rayDistance;
 			} else {
 			  // Increment the ray depth
-			  rayDistance += rayStep;
+			  rayDistance++;
 
 			  // Move the vector in deeper one
 			  ray_x += ray_xv;
-			  
 			  ray_y += ray_yv;
 			  ray_z += ray_zv;
 			}
