@@ -1,0 +1,365 @@
+<html>
+	<body>
+
+	<canvas id="canvas" width="1280" height="720" style="border:1px solid black" onmousemove="mm(event)"></canvas>
+	<br/>
+	<b>Use mouse for control</b>
+
+	<script>
+	let mouseX = 0, mouseY = 0;
+	function mm(event) {
+		mouseX = event.clientX;
+		mouseY = event.clientY;
+	}
+
+	function Main() {
+	  let screenWidth, screenHeight;
+	  const MAP_SIZE = 1024;
+	  const MAP_SIZE_AND = MAP_SIZE - 1;
+	  
+	  let bi;
+	  
+	  // now we can draw our imagedata onto the canvas
+	  let ctx;
+	  let data;
+	  
+	  // first, create a new ImageData to contain our pixels
+	  let imgData;
+	  
+	  let land = new Array(MAP_SIZE);
+	  let colmap = new Array(MAP_SIZE);
+	  let cs = new Int16Array(2560);
+	  let sn = new Int16Array(2560);
+	  let angle = 0.0;
+	  let maxZ;
+	  
+	  const SHIFT = 9;
+	  const ZSHIFT = SHIFT;
+	  const MAXSPEED = 4<<SHIFT;
+	  
+	  this.main = function() {
+		let canvas = document.getElementById("canvas");
+		screenWidth = canvas.width;
+		screenHeight = canvas.height;
+
+		ctx = canvas.getContext("2d");
+		console.log(screenWidth,"x", screenHeight);
+		imgData = ctx.getImageData(0,0,screenWidth, screenHeight); // width x height
+		data = new Uint32Array(imgData.data.buffer);
+
+		for(let i=0; i<MAP_SIZE; i++) {
+		  land[i] = new Uint8Array(MAP_SIZE);
+		  colmap[i] = new Uint8Array(MAP_SIZE);
+		}
+		
+		this.makeTables();
+		this.makeMap();
+		this.blurMap();
+		this.colourMap();
+		
+		maxZ = land[0][0];
+		for(let x=0; x<MAP_SIZE; x++) {
+		  for(let y=0; y<MAP_SIZE; y++) {
+			if (land[x][y]>maxZ) maxZ=land[x][y];
+		  } 
+		}
+		maxZ <<= ZSHIFT;
+		
+		this.update = function() {
+		  // Update game logic here.
+		  const cos = cs[angle|0], sin = sn[angle|0];
+		  const thrust = 0.2;
+		  mom_x += (cos*thrust)|0;
+		  mom_y += (sin*thrust)|0;
+		  // Air friction 
+		  const vec = Math.sqrt(mom_x*mom_x+mom_y*mom_y);
+		  const drag = Math.pow(vec/64,2) / vec;
+		  mom_x = (mom_x - (mom_x * drag))|0;
+		  mom_y = (mom_y - (mom_y * drag))|0;
+
+		  player_x += mom_x;
+		  player_y += mom_y;
+		  player_z -= yOffSet<<2;
+		  angle += xdiff;
+		  
+		  xdiff = xdiff * 0.97;
+		  
+		  angle -=  (mouseX-640)/64.0;
+		  yOffSet += (mouseY-360)/64.0;
+
+		  if (angle < 0.0) {
+			angle += 2560.0;
+		  }
+		  if (angle >= 2560.0) {
+			angle -= 2560.0;
+		  }
+		  if (xdiff < -11.0) {
+			xdiff = -11.0;
+		  }
+		  if (xdiff > 11.0) {
+			xdiff = 11.0;
+		  }
+		  if (yOffSet < -222) {
+			yOffSet = -222;
+		  }
+		  if (yOffSet > 222) {
+			yOffSet = 222;
+		  }
+		  
+		  
+		  // Make sure player stays above map
+		  let heightTemp = land[(player_x >> SHIFT) & MAP_SIZE_AND][(player_y >> SHIFT) & MAP_SIZE_AND];
+		  if ((heightTemp<<ZSHIFT) > player_z ) {
+			player_z = heightTemp << ZSHIFT ;
+		  }
+		}
+	 
+		this.next = function() {
+			if (this.isUpdating) return;
+			this.isUpdating=true;
+			this.update();
+			this.paint();
+			this.isUpdating=false;
+		};
+		setInterval(this.next.bind(this), 25);
+	  }
+	  
+	  let painting = false;
+	  this.makeTables = function() {
+		for (let cnt = 0; cnt < 2560; cnt++) {
+		  let num = cnt * 0.00245436926062;
+		  cs[cnt] = (Math.cos(num) * 256.0)|0;
+		  sn[cnt] = (Math.sin(num) * 256.0)|0;
+		}
+	  }
+	  
+	  this.makeMap = function() {
+		console.log("Making map");
+		
+		let height = 64;
+		
+		for (let x = 0; x < MAP_SIZE; x++) {
+		  land[x].fill(0);
+		}
+		
+		for(let pss = 64; pss > 0; pss>>=1) {
+		  this.adjustHeight(pss, height);
+		  this.smooth(pss);
+		  if (height!=1) {
+			height >>= 1;
+		  }
+		}
+	  }
+	  
+	  this.adjustHeight = function(pss, height) {
+		for (let x = 0; x < MAP_SIZE; x += pss) {
+		  for (let y = 0; y < MAP_SIZE; y += pss) {
+			land[x][y] += Math.random()*height;
+		  }
+		}
+	  }
+	  
+	  this.smooth = function(pss) {
+		let dff = pss >> 1;
+		for (let x = 0; x < MAP_SIZE; x += pss) {
+		  for (let y = 0; y < MAP_SIZE; y += pss) {
+			let xpss = (x + pss) & MAP_SIZE_AND, ypss = (y + pss) & MAP_SIZE_AND;
+			
+			land[(x + dff)][(y + dff)] = (land[x][y] + land[xpss][y] + land[xpss][ypss] + land[x][ypss])>> 2;
+			land[(x + dff)][y] = land[x][y] + land[xpss][y] >> 1;
+			land[x][(y + dff)] = land[x][y] + land[x][ypss] >> 1;
+			land[xpss][y + dff] = land[xpss][ypss] + land[xpss][y] >> 1;
+			land[(x + dff)][ypss] = land[xpss][ypss] + land[x][ypss] >> 1;
+		  }
+		}
+		
+	  }
+	  
+	  this.blurMap = function() {return;
+		let map2 = new Array(MAP_SIZE);
+		for(let i=0; i<MAP_SIZE; i++) {
+		  map2[i] = new Uint8Array(MAP_SIZE);
+		}
+		
+		let min, max;
+		for (let x = 0; x < MAP_SIZE; x++) {
+		  for (let y = 0; y < MAP_SIZE; y++) {
+			let hht = (land[(x+6) & MAP_SIZE_AND][(y-4) & MAP_SIZE_AND] << 2) + (
+				land[(x-4) & MAP_SIZE_AND][(y+8) & MAP_SIZE_AND] << 2)
+				+ (land[x][y] << 3);
+			hht >>= 5;
+			map2[x][y] = hht;
+			if (min==null || hht<min) min=hht;
+			if (max==null || hht>max) max=hht;
+		  }
+		}
+		let waterLevel = min + ((max - min) >> 2);
+
+		for (let x = 0; x < MAP_SIZE; x++) {
+		  for (let y = 0; y < MAP_SIZE; y++) {
+			let hht = map2[x][y]; //.toInt();
+			if (hht<waterLevel) hht=0; else hht -= waterLevel;
+			land[x][y] = hht;
+		  }
+		}
+	  }
+	  
+	  this.colourMap = function() {
+		console.log("colourMap");
+		
+		let min = null;
+		let max = null;
+		for (let x = 0; x < MAP_SIZE; x++) {
+		  for (let y = 0; y < MAP_SIZE; y++)
+		  {
+			let c = land[x][y] - land[(x + 3 & MAP_SIZE_AND)][(y + 3 & MAP_SIZE_AND)];
+			if (min==null || c < min) {
+			  min = c;
+			}
+			if (max==null || c > max) {
+			  max = c;
+			}
+		  }
+		}
+		let scale = 255.0 / (max - min);
+		for (let x = 0; x < MAP_SIZE; x++) {
+		  for (let y = 0; y < MAP_SIZE; y++) {
+			let c = (land[x][y] - land[(x + 3 & MAP_SIZE_AND)][(y + 3 & MAP_SIZE_AND)]);
+			c -= min;
+			c *= scale;
+			colmap[x][y] = c;
+		  }
+		}
+	  }
+	  
+	  let player_x = 128;
+	  let player_y = 128;
+	  let mom_x = 0;
+	  let mom_y = 0;
+	  let yOffSet = 99;
+	  let player_z = 16384;
+	  let xdiff = 0.0;
+	  let ydiff = 0;
+	  
+	  this.paint = function() {
+		
+		let pixels = screenWidth * screenHeight;
+		
+		// clear to sky colour
+		data.fill((255<<24));
+		
+		const rayLen = 512;
+		let testRayBit = 128;
+		let windowXmax = screenWidth >> 1;
+		let windowYmax = screenHeight >> 1;
+		
+		let windowX = -windowXmax;
+		
+		let cos = cs[angle|0];
+		let sin = sn[angle|0]; 
+
+		let player_xv = windowX * sin;
+		let player_yv = windowX * cos;
+
+		while (windowX < windowXmax-1) {
+		  let rayStep = 1;
+		  
+		  let ray_x = player_x;
+		  let ray_y = player_y;
+		  let ray_z = player_z;
+		  let offset = pixels - windowX - 1 - windowXmax;
+		  
+		  let windowY = -windowYmax;
+		  
+		  let ray_xv = cos - (player_xv >> 8);
+		  let ray_yv = sin + (player_yv >> 8);
+		  let ray_zv = windowY - yOffSet;
+		  
+			
+		  player_xv += sin;
+		  player_yv += cos;
+		  
+		  let ray_z_inc_to_next_screen_line = 0;
+		  for (let rayDistance = 0; rayDistance < rayLen;) {
+			// if the ray hits land...
+			if (maxZ >= ray_z && (land[(ray_x >> SHIFT) & MAP_SIZE_AND][(ray_y >> SHIFT) & MAP_SIZE_AND]<<ZSHIFT) >= ray_z) {
+			  
+			  // Find the colour
+			  let col = colmap[(ray_x >> SHIFT) & MAP_SIZE_AND][(ray_y >> SHIFT) & MAP_SIZE_AND];
+			  col -= (rayDistance >> 3);
+			  
+			  if (col >= 0) {
+				data[offset] = col + (col<<8) + (col<<16) + (255<<24);
+			  }
+
+			  // Move up one on the screen
+			  if (++windowY == windowYmax) {
+				break;
+			  }
+
+			  // Move to the next line in the screen buffer
+			  offset -= screenWidth;
+			  
+			  // Move the ray z angle up one (just luck this works as coordinate systems similar between screen and ray)
+			  ray_zv++;
+			  
+			  // somehow ray distance equals the vertical screen difference (again luck coord systems similar)
+			  ray_z_inc_to_next_screen_line += rayDistance;
+			  
+			  // re-calculate ray_z (height)
+			  ray_z = player_z + ray_z_inc_to_next_screen_line;
+			} else {
+			  // increase speed of ray as it moves to the distance
+			  if (rayDistance > testRayBit) {
+				testRayBit <<= 1;
+				rayStep <<= 1;
+				ray_xv <<= 1;
+				ray_yv <<= 1;
+				ray_zv <<= 1;
+			  }
+			  
+			  // Increment the ray depth
+			  rayDistance += rayStep;
+			  
+			  // when you go deeper you need to adjust inc to next line
+			  // inc to next line is effectively the difference between two rays one y pixel apart at ray distance
+			  ray_z_inc_to_next_screen_line += ray_zv;
+			  
+			  // Move the vector in deeper one
+			  ray_x += ray_xv;
+			  
+			  ray_y += ray_yv;
+			  ray_z += ray_zv;
+			}
+		  }
+		  windowX++;
+		}
+
+		// now we can draw our imagedata onto the canvas 
+		ctx.putImageData(imgData, 0, 0);
+		
+		ctx.strokeStyle = 'white';
+		
+		ctx.beginPath();
+		
+		ctx.moveTo(-100 + windowXmax, 0 + windowYmax);
+		ctx.lineTo( -50 + windowXmax, 50 + windowYmax);
+		
+		ctx.moveTo(100 + windowXmax, 0 + windowYmax);
+		ctx.lineTo( 50 + windowXmax, 50 + windowYmax);
+		
+		ctx.moveTo(-45 + windowXmax, -35 + windowYmax);
+		ctx.lineTo(-30 + windowXmax, -50 + windowYmax);
+		
+		ctx.moveTo( 45 + windowXmax, -35 + windowYmax);
+		ctx.lineTo( 30 + windowXmax, -50 + windowYmax);
+		
+		ctx.stroke();
+	  }
+	}
+
+	new Main().main();
+	</script>
+
+</body>
+</html>
